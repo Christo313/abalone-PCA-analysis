@@ -1,0 +1,152 @@
+---
+title: "STA437 Project1 Exploratory PCA of the Abalone Dataset"
+author: "Tianyu Dong"
+date: "2026-02-11"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+```
+
+## Introduction
+
+Understanding structure in multivariate data is a central goal of exploratory data analysis.
+When multiple variables are measured on the same observational units, relationships among variables often reveal patterns that are not visible through univariate summaries alone. Correlation, redundancy, and low-dimensional organization frequently arise in real datasets, motivating the use of dimension reduction techniques such as Principal Component Analysis (PCA).
+
+The dataset originates from the UCI Machine Learning Repository (Nash et al. 1994; Waugh 1995). This project examines the Abalone dataset, a well-known benchmark dataset containing physical measurements of abalone collected from the coast of Tasmania, Australia. Abalone are marine mollusks whose age is traditionally determined by counting shell rings, a process that is both destructive and time-consuming. The dataset includes several continuous variables describing shell size and weight, along with a categorical variable indicating sex (male, female, or infant) and a target variable representing ring counts.
+
+Because these physical measurements are biologically related, substantial correlations among variables are expected. Such dependence suggests that the data may possess a lower-dimensional structure, where a small number of latent factors capture much of the variation. The objective of this analysis is therefore threefold:
+	1.	To describe the dataset and examine its basic statistical properties
+	2.	To explore relationships among variables using visual and numerical EDA tools
+	3.	To identify and interpret low-dimensional structure using PCA
+
+By applying techniques from the course, this study aims to reveal how variation in shell dimensions and weight measurements organizes the data, and to provide an interpretable account of the dominant patterns present in the dataset.
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+
+df <- read.csv("abalone_data.csv")
+
+numeric_cols <- c("length","diameter","height",
+                  "whole_weight","shucked_weight",
+                  "viscera_weight","shell_weight")
+
+colnames(df) <- tolower(colnames(df))
+
+x <- df[, numeric_cols]
+sex <- df$sex
+
+```
+
+
+```{r}
+x_long <- x %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+
+ggplot(x_long, aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~ variable, scales = "free") +
+  labs(
+    title = "Figure 1. Distributions of Numeric Variables",
+    x = "Value",
+    y = "Count"
+  ) 
+```
+Figure 1 shows the marginal distributions of the seven numeric variables. The weight variables (whole_weight, shucked_weight, viscera_weight, shell_weight) are clearly right-skewed, with most observations concentrated at smaller values and a long tail of heavier abalones. In contrast, the dimension variables (length, diameter, height) look closer to symmetric. This combination suggests the dataset is unlikely to be perfectly multivariate normal, and that a correlation-based PCA may be more appropriate for comparing variables on different scales. The visible tails also suggest that a few unusually large abalones may act as high-leverage points in multivariate space.
+
+```{r}
+corr <- cor(x)
+corr_m <- melt(corr)
+
+ggplot(corr_m, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(limits = c(-1,1)) +
+    labs(
+    title = "Correlation Structure of Abalone Variables") +
+  coord_fixed()
+```
+Figure 2 reveals strong positive correlations across nearly all variables, especially among the size measurements (length, diameter, height) and among the weight measurements. This pattern indicates substantial redundancy: multiple variables are measuring closely related aspects of overall body size. Such block-like correlation structure is a classic sign of low-dimensional organization, where a small number of latent factors (e.g., “overall size”) may explain much of the joint variation. This motivates PCA as a way to summarize the dataset with fewer dimensions while preserving the dominant relationships.
+
+# This is the Scree plot for PCA analysis & The cumulative variance being explained
+```{r}
+pca_cov <- prcomp(x, scale. = FALSE)
+pca_cor <- prcomp(x, scale. = TRUE)
+
+eigs_cov <- pca_cov$sdev^2
+eigs_cor <- pca_cor$sdev^2
+
+evr_cov <- eigs_cov / sum(eigs_cov)
+evr_cor <- eigs_cor / sum(eigs_cor)
+
+tibble(pc = 1:length(eigs_cor), eigenvalue = eigs_cor) %>%
+  ggplot(aes(pc, eigenvalue)) +
+  geom_line() + geom_point() +
+  labs(
+    title = "Scree Plot from Correlation PCA")
+
+tibble(pc = 1:length(evr_cor), cumvar = cumsum(evr_cor)) %>%
+  ggplot(aes(pc, cumvar)) +
+  geom_line() + geom_point() +
+    labs(
+    title = "Scree Plot from Correlation PCA") +
+  ylim(0,1)
+```
+Figure 3 summarizes the PCA eigenvalue spectrum under correlation PCA (standardized variables). The scree plot shows a steep drop after the first component, indicating that PC1 captures a dominant source of variation. The cumulative variance curve rises quickly, showing that the first two components explain a large fraction of the standardized variance. This supports focusing interpretation on the first two PCs for visualization and narrative, while remaining components likely represent more specific residual patterns or noise-level variation.
+
+
+# The Score Plot & loadings
+
+```{r}
+scores <- as.data.frame(pca_cor$x)
+scores$sex <- sex
+
+ggplot(scores, aes(PC1, PC2, color = sex)) +
+  geom_point(alpha = 0.6) +
+    labs(
+    title = "PCA Score Plot (PC1 vs PC2)")
+
+loadings <- as.data.frame(pca_cor$rotation[,1:2])
+loadings$variable <- rownames(loadings)
+
+loadings %>%
+  pivot_longer(cols = c(PC1, PC2), names_to = "pc", values_to = "loading") %>%
+  ggplot(aes(variable, loading)) +
+  geom_col() +
+  facet_wrap(~ pc) +
+  coord_flip()
+```
+Figure 4 interprets the first two PCs using both scores and loadings. In the score plot, observations vary primarily along PC1, suggesting a dominant gradient in the data. The loading plot shows that PC1 assigns similar sign and substantial magnitude to most size and weight variables, which supports interpreting PC1 as an “overall size/mass” axis: abalones with larger shells and heavier weights tend to have larger PC1 scores. PC2 typically reflects a secondary contrast: it separates variables related to linear dimensions from those related to weight composition, capturing differences in shape or relative mass distribution after controlling for overall size. Coloring the score plot by sex suggests whether groups (M/F/I) differ mainly by overall size (PC1 separation) or by secondary morphology (PC2 separation); in many biological datasets, infants often cluster toward smaller size values.
+
+
+## Conclusion
+This exploratory analysis of the Abalone dataset reveals clear evidence of structured multivariate relationships among the physical measurements. The marginal distributions show that weight-related variables are right-skewed, while shell dimension variables are more symmetric, indicating mild departures from multivariate normality.  
+
+The correlation analysis demonstrates strong positive associations across nearly all variables, particularly within groups of size and weight measurements. This redundancy suggests that multiple variables capture similar aspects of abalone morphology.  
+
+Principal Component Analysis confirms the presence of low-dimensional structure. The scree plot indicates that the first principal component explains a dominant proportion of variance, while the cumulative variance curve shows that the first two components capture most of the standardized variability. Examination of loadings suggests that PC1 represents an overall size or mass factor, with all measurements contributing in a consistent direction. PC2 reflects a secondary contrast, likely capturing shape or relative weight composition differences after accounting for overall size.  
+
+The PCA score plot further illustrates that observations vary primarily along PC1, consistent with biological size variation. Group patterns by sex indicate that infants tend to cluster toward smaller PC1 values, supporting the interpretation of PC1 as a size-related axis.  
+
+Overall, the dataset exhibits strong correlation-driven organization, where variation is largely governed by a dominant size dimension with smaller secondary effects. PCA provides a compact and interpretable representation of these relationships, effectively summarizing the structure of the data.
+
+\newpage
+
+## References
+
+Nash, W. J., Sellers, T. L., Talbot, S. R., Cawthorn, A. J., & Ford, W. B. (1994).  
+The population biology of abalone...
+
+Waugh, S. G. (1995).  
+Extending and benchmarking cascade-correlation...
+\newpage
+AI use acknowledgement
+
+1. Mainly used for debugging the code when there occurred a unsolvable issue\
+2. Helped to elaborate the interpretations for the visualizations, for instance, "The weight variables display right-skewed distributions, with many moderate values and fewer extreme high values. This skewness reflects natural biological variation, where larger abalones can attain substantially greater mass. In contrast, shell dimension variables such  as length, diameter, and height appear more symmetric, indicating more evenly distributed variation." to "Figure 1 shows the marginal distributions of the seven numeric variables. The weight variables (whole_weight, shucked_weight, viscera_weight, shell_weight) are clearly right-skewed, with most observations concentrated at smaller values and a long tail of heavier abalones. In contrast, the dimension variables (length, diameter, height) look closer to symmetric. This combination suggests the dataset is unlikely to be perfectly multivariate normal, and that a correlation-based PCA may be more appropriate for comparing variables on different scales. The visible tails also suggest that a few unusually large abalones may act as high-leverage points in multivariate space."
+
+
+
+
+
